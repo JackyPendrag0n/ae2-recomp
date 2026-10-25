@@ -1,0 +1,35 @@
+# Game content and anything generated from it: never commit these
+/game/
+*.iso
+*.bin
+*.img
+*.cue
+*.chd
+*.cso
+*.mdf
+*.nrg
+SCES_508.85
+*.IRX
+*.irx
+/port/gen/
+/port/build-vu/
+/recomp/vu_programs/
+
+# Build output (a compiled port contains code translated from the game)
+/port/build-*/
+/port/ae2
+/port/ae2.exe
+/port/ae2-check
+/port/ae2-check.exe
+/dist/
+/platform/windows/.deps/
+
+# Runtime files
+memcard/
+ae2-settings.ini
+*.ae2rec
+*.ppm
+*.wav
+__pycache__/
+*.pyc
+.DS_Store

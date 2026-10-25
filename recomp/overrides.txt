@@ -1,0 +1,53 @@
+# address  hle_name   -- functions replaced by host implementations (src/hle_overrides.c)
+0039e5e8  tty_write      # write(fd, buf, len) over DECI2 TTY
+001a5db0  movie_start    # skip FMVs whose files are not present
+0036cb18  dbc_state      # libdbc: socket connection state (1 = ready)
+0036c950  dbc_read       # libdbc: read controller data (buttons + analog + pressure)
+0036cc58  dbc_element    # libdbc: read one element (analog axis / button) by index
+0036cfe0  dbc_send       # libdbc: send actuator (vibration) data
+0019cbf8  set_game_mode  # logging wrapper around the game's mode switch
+001a6b78  movie_bank_load
+001a10e0  camlook        # camera look-at from eye and target points
+0029b5c0  mover          # character mover (no-clip hook)
+001a8008  mvconv         # FMV: skip re-converting an unchanged movie frame
+00375a78  mpeg_wait      # libmpeg: wait for IPU command, feeding data without spinning
+0023c498  opt_input      # options menu: input handling (native Graphics page)
+001a0d28  proj_build     # camera projection matrix
+001ae8c8  pad_update     # controller parser (player 2's pad, p2.c)
+0029a1f0  player_phase   # player frame phase (player 2, p2.c)
+0029d208  player_model   # player model and pose update (monkey.c: play as a monkey)
+00344688  bone_find      # joint matrix by motion and joint name (monkey.c: Spike's joint names on a monkey)
+0029b298  player_control # player control (camera-relative input; player 2, p2.c)
+00293310  ride_step      # the player's ride (vehicles): runs for player 2 too (p2.c)
+002c5958  veh_step       # vehicles' step: each runs with its rider in place (p2.c)
+001af2f8  input_update   # per-frame input: both pads merged into one (player 2, p2.c)
+0019cf28  stage_frame    # stage frame (p2.c: split screen)
+00193100  frame_kick     # frame draw-list kick (p2.c: split screen)
+00189ed8  sound_frame    # per-frame sound/stream sync (p2.c: skipped in the split-screen pass)
+00348f28  model_register # model registry insert (p2.c: Kakeru's models for player 2)
+0029cbe8  player_init    # player set-up at stage load (p2.c: player 2 rejoins)
+001c0368  title_menu     # title menu input (p2.c: the 2 Players item)
+001c04c0  title_menu_draw # title menu words (p2.c: the 2 Players item)
+00138ff0  boss_damage    # boss life -= damage: halved in 2-player mode (double boss health)
+00284888  player_attack  # player attack/gadget hits (p2.c: again for player 2)
+0029a260  player_task    # player task handler (p2.c: player 2 in the stage intro)
+001adde0  intro_player_draw # intro player pose and draw (p2.c: player 2 in the stage intro)
+0019c8f8  pause_check    # Start pressed: open the pause menu (p2.c: player 2 pauses with their own menu)
+
+001b8bf8  sound_play     # play a sound effect (p2.c: player 2's voice from their own bank)
+001e4338  monkey_sense   # monkey sensor: also senses player 2 (p2.c)
+001e45f8  monkey_sight   # monkey sight check: sees player 2 (p2.c)
+00270a00  camera_update  # cameras' frame step (p2.c: keeps player 2's view off player 1's gotcha shot)
+00193be0  archive_load   # player 2's character makes room for a stage archive that would not fit
+001a4350  mem_init       # memory set-up: the heap reaches the top of the (larger) RAM instead of 0x1fa0000
+001dc148  actors_step    # stage actors' step (p2.c: actors nearer to player 2 see player 2)
+001dc210  actors_late    # stage actors' message 7 (p2.c: same)
+001dc2a0  actors_hit     # stage actors' message 6, their attacks (p2.c: same)
+001dc340  actors_msg4    # stage actors' message 4 (p2.c: boss controllers nearer player 2 see player 2)
+00137258  boss_frame     # every boss's per-frame routine (p2.c: which boss each controller drives)
+0034a260  model_coll     # registers a model's collision volumes for the frame (p2.c: player 2 uses player 1's)
+0028a180  pachinko_shot  # slingshot shot by kind (monkey.c: the monkeys' bombs, pellets, homing)
+002b55c8  slots_save     # button slots into the save (monkey.c: the monkeys' slots are not saved)
+00287278  ammo_count     # slingshot ammo count by kind (monkey.c: the monkeys' ammo is endless)
+0029c498  pl_premove     # empty, called by the mover between velocity and move (monkey.c: blue's speed, the shield)
+00343fe8  model_draw     # queues a model at a matrix (monkey.c: the green monkey's missiles point where they fly)

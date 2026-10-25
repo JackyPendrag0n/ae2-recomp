@@ -1,0 +1,59 @@
+# Checks that the runtime compiles on every platform. The full program cannot be built
+# here: it needs port/gen, which is made from your own disc and is never uploaded.
+# Nothing built here is published.
+name: build check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
+      - run: make -C port PLATFORM=linux runtime -j"$(nproc)"
+
+  linux-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
+      - run: make -C port PLATFORM=linux runtime -j"$(nproc)"
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          install: make mingw-w64-x86_64-gcc mingw-w64-x86_64-SDL2
+      - run: make -C port PLATFORM=windows runtime -j"$(nproc)"
+
+  windows-cross:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y mingw-w64
+      - run: |
+          SDL_VER=2.30.12
+          curl -fL -o sdl2.tar.gz "https://github.com/libsdl-org/SDL/releases/download/release-$SDL_VER/SDL2-devel-$SDL_VER-mingw.tar.gz"
+          tar xzf sdl2.tar.gz
+          make -C port PLATFORM=windows CROSS=x86_64-w64-mingw32- SDL2_PREFIX="$PWD/SDL2-$SDL_VER/x86_64-w64-mingw32" runtime -j"$(nproc)"
+
+  macos:
+    strategy:
+      matrix:
+        include:
+          - { os: macos-14, arch: arm64 }
+          - { os: macos-15-intel, arch: x86_64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install sdl2
+      - run: make -C port PLATFORM=macos ARCH=${{ matrix.arch }} runtime -j"$(sysctl -n hw.ncpu)"
