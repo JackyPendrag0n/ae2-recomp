@@ -87,6 +87,7 @@ static int kit_hide;               /* Spike's gadget is hidden (the monkey holds
 static int ab_kind = -1;          /* the monkey whose abilities are on this frame, -1 none */
 enum { MK_YELLOW, MK_WHITE, MK_BLUE, MK_BLACK, MK_RED, MK_LIGHTBLUE, MK_GREEN, MK_SPECTER };
 int p2_block_is_p1(void);
+int p2_active(void);
 static int pl_is_p1(void) { return p2_block_is_p1(); }   /* the block at PL_BASE is player 1's */           /* the player is drawn as a monkey this stage frame */
 static int spt_on;                 /* player 1 is Specter this frame */
 static const char *spt_map(const char *p);
@@ -666,16 +667,17 @@ static int chars_bone(Ctx *c) {
     const float *mx; int j;
     if ((j = joint_index(l, nm)) >= 0 && j < rt.ns) mx = rt_src_world[j];        /* Spike's, for his gadgets */
     else if ((j = joint_index(lt, nm)) >= 0 && j < rt.n) mx = rt_out[j];         /* the character's own */
-    else mx = rt_W;   /* none: the model's place (the Professor's head piece asks with no name) */
+    else mx = rt_W;   /* none: the model's place (0x3498a0 asks for an attach point the character's model lacks, with no joint name) */
     uint32_t o = PL_PARTS + 16 + 7 * 16;
     for (int k = 0; k < 16; k++) sf(o + 4 * k, mx[k]);
     c->r[2].sd[0] = (int32_t)o;
     return 1;
 }
 static void chars_frame(Ctx *c, int ci) {
-    static int tries; static uint32_t scene = ~0u;
+    static int tries, had; static uint32_t scene = ~0u;
     uint32_t sc = MR32(0x3b35a0u + 0x80); if (sc != scene) { scene = sc; tries = 0; }
     int m = model_index(c, chars[ci].model);
+    if (m >= 0) had = 1; else if (had) { had = 0; tries = 0; }   /* a stage load (also a retry of the same scene) dropped it */
     if ((m < 0 || mot_find(chars[ci].rest) < 0) && MR32(GS_MODE) == 3) { archive_load(c, "STA_COM", MK_GROUP << 1, &tries); tries = 3; m = model_index(c, chars[ci].model); }
     if (m < 0 || mot_find(chars[ci].rest) < 0) { static int said; if (MR32(GS_MODE) == 3 && said++ < 4) INFO("[chars] %s: model %d, motion %d, mode %u\n", chars[ci].model, m, mot_find(chars[ci].rest), MR32(GS_MODE)); char_on = -1; restore_player(c); return; }
     char n[16] = {0}; snprintf(n, 16, "%s", chars[ci].model);
@@ -705,6 +707,16 @@ void hle_model_draw(Ctx *c) {
             float y[3] = { z[1] * x[2] - z[2] * x[1], z[2] * x[0] - z[0] * x[2], z[0] * x[1] - z[1] * x[0] };
             for (int i = 0; i < 3; i++) { sf(d + 4 * i, x[i] * s); sf(d + 16 + 4 * i, y[i] * s); sf(d + 32 + 4 * i, z[i] * s); }
         }
+    }
+    /* Specter strikes bare-handed: the Magic Punch's glove (gm_punch), which still flies
+     * out and hits, is drawn shrunk to nothing (one player only: in split screen the
+     * glove could be player 2's) */
+    if (g_monkey_mode == 10 && !p2_active() && MR32(d + 68) == (uint32_t)model_index(c, "gm_punch")) {
+        uint8_t sv[48]; gread(sv, d, sizeof sv);
+        static const uint8_t z[48]; gwrite(d, z, sizeof z);
+        f_00343FE8_orig(c);
+        gwrite(d, sv, sizeof sv);
+        return;
     }
     f_00343FE8_orig(c);
     static float m2[RT_MAX][16];   /* the joints step (flag 2) leaves Spike's joints in model space */
@@ -758,9 +770,10 @@ static const char *spt_map(const char *p) {
     return "bs_spt_wait";
 }
 static void spt_frame(Ctx *c) {
-    static int tries; static uint32_t scene = ~0u;
+    static int tries, had; static uint32_t scene = ~0u;
     uint32_t sc = MR32(0x3b35a0u + 0x80); if (sc != scene) { scene = sc; tries = 0; }
     int m = model_index(c, SPT_MODEL);
+    if (m >= 0) had = 1; else if (had) { had = 0; tries = 0; }
     if ((m < 0 || mot_find("bs_spt_wait") < 0) && MR32(GS_MODE) == 3) { archive_load(c, "BOS_H_COM", MK_GROUP << 2, &tries); tries = 3; m = model_index(c, SPT_MODEL); }
     if (m < 0 || mot_find("bs_spt_wait") < 0) { abilities(c, -1); spt_dash = spt_taunt = 0; restore_player(c); return; }
     char n[16] = {0}; snprintf(n, 16, "%s", SPT_MODEL);

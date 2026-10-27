@@ -231,3 +231,73 @@ run 2370 146 2aaf10
 run 2800 256 2ab3a8
 run 3000 8 2abbb0
 zero 3040 504
+prog vu0_0120_ce3c99c8ef587132.txt | entry 0120 hash ce3c99c8ef587132 unit 0
+run 0120 2 2b0e40
+run 0130 17 2b0f60
+prog vu0_0d70_21af3812cfcde8e8.txt | entry 0d70 hash 21af3812cfcde8e8 unit 0
+run 0d70 53 2b1ba8
+prog vu1_0000_3c7a4b2787eb0ae8.txt | entry 0000 hash 3c7a4b2787eb0ae8 unit 1
+run 0000 54 2aa4b0
+prog vu1_0010_ddd1a4daebafed31.txt | entry 0010 hash ddd1a4daebafed31 unit 1
+run 0010 52 2aa4c0
+prog vu1_0020_084b7477b98f29fe.txt | entry 0020 hash 084b7477b98f29fe unit 1
+run 0020 28 2aa4d0
+prog vu1_01b0_d7780d12905dd8d2.txt | entry 01b0 hash d7780d12905dd8d2 unit 1
+run 01b0 1 2a9488
+run 01b8 9 2aa668
+prog vu1_01d0_d01d9579011d8660.txt | entry 01d0 hash d01d9579011d8660 unit 1
+run 01d0 6 2aa680
+prog vu1_0200_9bb7e2519fee263e.txt | entry 0200 hash 9bb7e2519fee263e unit 1
+run 0000 54 2aa4b0
+run 0200 1 2a9488
+run 0208 76 2aa6b8
+run 2140 1 2a9878
+run 2148 1 2a9888
+run 2150 66 2aacf0
+run 2370 51 2aaf10
+run 2518 93 2ab0b8
+run 2800 256 2ab3a8
+run 3000 8 2abbb0
+zero 3040 504
+prog vu1_0218_78731e572c2a89e3.txt | entry 0218 hash 78731e572c2a89e3 unit 1
+run 0218 1 2a9488
+run 0220 4 2a9530
+prog vu1_02b8_fe55d90208301560.txt | entry 02b8 hash fe55d90208301560 unit 1
+run 0000 54 2aa4b0
+run 02b8 1 2a9488
+run 02c0 2 2aa6b8
+run 02d0 51 2aa780
+run 2140 1 2a9878
+run 2148 1 2a9888
+run 2150 66 2aacf0
+run 2370 51 2aaf10
+run 2518 93 2ab0b8
+run 2800 256 2ab3a8
+run 3000 8 2abbb0
+zero 3040 504
+prog vu1_03a8_3ef30d46c5486bdd.txt | entry 03a8 hash 3ef30d46c5486bdd unit 1
+run 03a8 1 2a9488
+run 03b0 2 2aa6b8
+run 03c0 21 2aa870
+prog vu1_0468_706169022d935355.txt | entry 0468 hash 706169022d935355 unit 1
+run 0468 1 2a9488
+run 0470 2 2aa6b8
+run 0480 8 2aa930
+prog vu1_04c0_096a6c9333d0f976.txt | entry 04c0 hash 096a6c9333d0f976 unit 1
+run 04c0 1 2a9488
+run 04c8 2 2aa6b8
+run 04d8 1 2aa780
+run 04e0 2 2aa930
+run 04f0 3 2aa798
+run 0508 19 2aa9b8
+prog vu1_2350_b3141a5a1eecf59e.txt | entry 2350 hash b3141a5a1eecf59e unit 1
+run 0000 58 2a93d0
+run 0218 1 2a9488
+run 0220 4 2a9530
+run 0240 143 2a9610
+run 2138 1 2ae568
+run 2140 166 2ae630
+run 2670 50 2ab210
+run 2800 256 2ab3a8
+run 3000 8 2abbb0
+zero 3040 504

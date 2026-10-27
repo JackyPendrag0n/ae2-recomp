@@ -117,7 +117,10 @@ void iop_imp_libsd_18(IopCtx *c) { RET(sd_block_trans((int)A(0), A(1), A(2), A(3
 void iop_imp_libsd_19(IopCtx *c) { RET(sd_voice_trans_status((int)A(0), (int)A(1))); }
 void iop_imp_libsd_20(IopCtx *c) { RET(sd_block_trans_status((int)A(0), (int)A(1))); }
 void iop_imp_libsd_21(IopCtx *c) { RET(sd_set_trans_callback((int)A(0), A(1))); }
-void iop_imp_libsd_23(IopCtx *c) { RET(0); }   /* sceSdSetEffectAttr: reverb not emulated */
+void iop_imp_libsd_23(IopCtx *c) {   /* sceSdSetEffectAttr(core, {core, mode, depth_L, depth_R, delay, feedback}) */
+    uint32_t a = A(1);
+    RET(sd_set_effect_attr((int)A(0), (int)IR32(a + 4), (int16_t)IR16(a + 8), (int16_t)IR16(a + 10), (int)IR32(a + 12), (int)IR32(a + 16)));
+}
 
 /* libsd transfer-complete callbacks: int cb(int channel) */
 static void trans_cb_hook(int chan, uint32_t func) { iop_run(func, (uint32_t)chan, 0, 0, 0); }

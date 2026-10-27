@@ -23,7 +23,7 @@ You need your own copy of the game: `port/gen` is generated from your disc's exe
 - **Audio.** The game's own IOP sound driver (`SNDN2DRV.IRX`) is statically recompiled from the disc copy (`port/gen/iop_sndn.c`). It runs on an emulated SPU2:
   - 48 ADPCM voices with ADSR envelopes, and the PCM streaming input.
   - Sound effects, jingles and the in-game music that comes from the sound banks are all played this way.
-  - Reverb is not emulated yet, so everything sounds "dry".
+  - Reverb: the SPU2's effect unit runs as on the PS2 (the PS1's reverb algorithm at half the output rate, in each sound core's work area of sound memory), with libsd's presets. The game sets "Studio C" on both cores at about 20% depth. `AE2_REVERB=0` turns it off.
 - **MOVIE / PCM / VOICE folders.** None of them is required, and any of them can be copied into the game folder later under the same names (for example `PCM/BGM/TITLE.SPS`); the port picks them up with no rebuild.
   - Without `MOVIE/`, every FMV is skipped automatically: the publisher logo, the opening, and the stage movies.
   - Without `PCM/` (the streamed music, such as the title theme), the game streams silence where that music would be.
@@ -200,7 +200,7 @@ does, the rest keep their rest pose, and bone lengths stay their own. Gadgets ar
 in their right hand.
 
 Known issues: outside the Station the Professor's head does not draw (only the dome on
-top shows); Natalie is complete. Faces don't animate, and very stretched poses (ladders,
+top shows; it is the same model in the Station and elsewhere, so it is most likely a texture only the Station's own archive brings); Natalie is complete. Faces don't animate, and very stretched poses (ladders,
 swinging) can look stiff. Player 2 stays Kakeru.
 
 ### Play as Specter
@@ -219,7 +219,7 @@ from both standing poses).
 |---|---|
 | △ (and Hikaru's net slot) | the net, swung with his attack swing |
 | ○ | his energy shot: homing shots from his bare hand (the slingshot's aim and flight, endless) in his shooting pose |
-| □ | his strike: the Magic Punch swung with his attack swing (its glove still flies out) |
+| □ | his strike: the Magic Punch swung with his attack swing (the glove that flies out and hits is not drawn, with one player) |
 | L1 | warp dash: a short burst at four times the speed in his dodge pose, and nothing hurts him while it lasts |
 | R3 (press the right stick) while standing | he laughs (L2 stays the game's look-around view) |
 
@@ -346,6 +346,7 @@ at a time (the one touching it, or the nearer one).
 | `AE2_VUCAPTURE=dir` | save any VU microprogram that has no compiled version (see below) |
 | `AE2_NOSIMD=1` | disable the SSE4.1 span renderer |
 | `AE2_NOAUDIO=1` | don't open an audio device (sound is still mixed for timing) |
+| `AE2_REVERB=0` | no reverb (the SPU2 effect unit) |
 | `AE2_WAVOUT=file.wav` | also write the audio output to a WAV file |
 | `AE2_INPUT="..."` | scripted input for testing, e.g. `m1+350:start;m1+356:-start;m3+700:stick=0,-127;m3+800:rstick=127,0` (frame or mode+frame : buttons / sticks) |
 | `AE2_DUMP_EVERY=n`, `AE2_DUMP_DIR=dir` | write every n-th frame as a PPM file |
@@ -430,4 +431,4 @@ platform/      build scripts for Linux, Windows (MSYS2 or cross from Linux) and 
 
 ### Regenerating the code
 
-`tools/setup_game.py` does this from your own disc (see the main README). Later stages may upload VU microprograms that are not in `recomp/vu_programs.recipe` yet; those run in the VU interpreter, which is correct but slower. To add them: run once with `AE2_VUCAPTURE=captures`, then `python3 tools/vu_programs.py make captures game/SCES_508.85 new.recipe` turns the captures into recipe lines (ELF offsets only, no game code) to merge into `recomp/vu_programs.recipe`.
+`tools/setup_game.py` does this from your own disc (see the main README). Every area of every stage was run once with `AE2_VUCAPTURE` (port 32) and the programs it found are in the recipe, so no VU program should be left to the interpreter; the run's end report (`-v`) says `interpreted 0` when that holds. If a new one turns up, it runs in the VU interpreter, which is correct but slower. To add it: run once with `AE2_VUCAPTURE=captures`, then `python3 tools/vu_programs.py make captures game/SCES_508.85 new.recipe` turns the captures into recipe lines (ELF offsets only, no game code) to merge into `recomp/vu_programs.recipe`.

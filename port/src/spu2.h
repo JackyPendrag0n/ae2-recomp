@@ -12,6 +12,7 @@ uint32_t sd_get_switch(uint32_t entry);
 void sd_set_addr(uint32_t entry, uint32_t value);
 uint32_t sd_get_addr(uint32_t entry);
 void sd_set_core_attr(uint32_t entry, uint32_t value);
+int sd_set_effect_attr(int core, int mode, int16_t depth_l, int16_t depth_r, int delay, int feedback);
 int sd_voice_trans(int chan, uint32_t mode, uint32_t iopaddr, uint32_t spuaddr, uint32_t size);
 int sd_voice_trans_status(int chan, int flag);
 uint32_t sd_block_trans(int chan, uint32_t mode, uint32_t iopaddr, uint32_t size, uint32_t start);
