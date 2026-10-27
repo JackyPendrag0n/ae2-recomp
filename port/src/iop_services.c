@@ -132,6 +132,18 @@ int cdvd_search(const char *name, uint32_t *lsn, uint32_t *size) {
     return 0;
 }
 
+/* a stage file (STAGE/.../<code>.BIN) is in the disc table: the scene table also lists
+ * areas that never shipped (BEA_B1), and loading one searches for an empty name forever */
+int cdvd_stage_on_disc(const char *code) {
+    char want[32]; snprintf(want, sizeof want, "/%s.BIN", code);
+    size_t wl = strlen(want);
+    for (int i = 0; i < ndfiles; i++) {
+        size_t l = strlen(dfiles[i].path);
+        if (!strncasecmp(dfiles[i].path, "STAGE/", 6) && l > wl && !strcasecmp(dfiles[i].path + l - wl, want)) return 1;
+    }
+    return 0;
+}
+
 /* ======================================================== servers */
 static uint32_t result_area;   /* scratch IOP memory for replies */
 #define RES(off) (*(uint32_t *)IOP(result_area + (off)))

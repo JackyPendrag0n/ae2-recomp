@@ -7,7 +7,9 @@
  *    callback fired at every half-buffer boundary.
  *  - Output: 48 kHz stereo to SDL audio, or paced in real time without audio
  *    (headless) so that streaming timing stays correct; optional WAV capture.
- *  Reverb is not emulated (effect sends are ignored).
+ *  - Reverb: the SPU2's effect unit (the same algorithm as the PS1's SPU), set
+ *    up from libsd's presets (sceSdSetEffectAttr), running at half rate in each
+ *    core's effect work area in sound memory.
  *
  * Locking: spu_mtx protects all SPU state. Transfer callbacks run IOP module
  * code, so they are invoked outside spu_mtx through spu2_cb_hook. */
@@ -48,6 +50,14 @@ typedef struct {
     uint16_t mvoll, mvolr, evoll, evolr, avoll, avolr, bvoll, bvolr, mmix;
     uint32_t esa, eea, tsa, irqa;
     uint16_t attr;
+    /* reverb (see "reverb" below) */
+    int fx_on;                     /* core attribute: effects enabled */
+    int16_t rv[32];                /* the effect registers, in the PS1 order (dAPF1 .. vRIN) */
+    uint32_t rv_start, rv_end;     /* work area, in 16-bit words (inclusive) */
+    uint32_t rv_pos;               /* current base offset in the work area */
+    int rv_mode;
+    int32_t rv_in[2][64], rv_out[2][64];   /* down/upsampling histories (24 kHz <-> 48 kHz) */
+    uint32_t rv_hp, rv_phase;
     /* ADMA */
     int adma_on, adma_loop;
     uint32_t adma_base, adma_size, adma_pos;   /* pos in samples */
@@ -177,25 +187,147 @@ static inline int16_t voice_sample(Core *c, int vi) {
 /* ------------------------------------------------------------------ mixer */
 static uint32_t adma_pending;   /* bit per core: half-buffer boundary crossed */
 
+/* ------------------------------------------------------------------ reverb
+ * The PS1/PS2 effect unit.  It runs at half the output rate, one channel per
+ * output sample (left on even samples, right on odd ones), through a 39-tap
+ * half-band filter each way, with all of its delay lines in the core's work
+ * area of sound memory (ESA..EEA), which moves on by one word every two samples.
+ * Registers in the order of libsd's presets (and the PS1's SPU): */
+enum { R_dAPF1, R_dAPF2, R_vIIR, R_vCOMB1, R_vCOMB2, R_vCOMB3, R_vCOMB4, R_vWALL, R_vAPF1, R_vAPF2,
+       R_mLSAME, R_mRSAME, R_mLCOMB1, R_mRCOMB1, R_mLCOMB2, R_mRCOMB2, R_dLSAME, R_dRSAME,
+       R_mLDIFF, R_mRDIFF, R_mLCOMB3, R_mRCOMB3, R_mLCOMB4, R_mRCOMB4, R_dLDIFF, R_dRDIFF,
+       R_mLAPF1, R_mRAPF1, R_mLAPF2, R_mRAPF2, R_vLIN, R_vRIN };
+/* libsd's presets (OFF, ROOM, STUDIO_A/B/C, HALL, SPACE, ECHO, DELAY, PIPE): work area
+ * size in 16-byte units, then the 32 registers (addresses in 8-byte units) */
+static const uint16_t rv_size[10] = { 0x1, 0x26C, 0x1F4, 0x484, 0x6FE, 0xADE, 0xF6C, 0x1804, 0x1804, 0x3C0 };
+static const uint16_t rv_preset[10][32] = {
+    { 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0001, 0x0001, 0x0000, 0x0000, 0x0000, 0x0000,
+      0x0000, 0x0000, 0x0001, 0x0001, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000 },
+    { 0x007D, 0x005B, 0x6D80, 0x54B8, 0xBED0, 0x0000, 0x0000, 0xBA80, 0x5800, 0x5300, 0x04D6, 0x0333, 0x03F0, 0x0227, 0x0374, 0x01EF,
+      0x0336, 0x01B7, 0x0335, 0x01B6, 0x0334, 0x01B5, 0x0334, 0x01B5, 0x0334, 0x01B5, 0x01B4, 0x0136, 0x00B8, 0x005C, 0x8000, 0x8000 },
+    { 0x0033, 0x0025, 0x70F0, 0x4FA8, 0xBCE0, 0x4410, 0xC0F0, 0x9C00, 0x5280, 0x4EC0, 0x03E4, 0x031B, 0x03A4, 0x02AF, 0x0372, 0x0266,
+      0x031C, 0x025D, 0x025C, 0x018E, 0x022F, 0x0135, 0x01D2, 0x00B7, 0x018F, 0x00B5, 0x00B4, 0x0080, 0x004C, 0x0026, 0x8000, 0x8000 },
+    { 0x00B1, 0x007F, 0x70F0, 0x4FA8, 0xBCE0, 0x4510, 0xBEF0, 0xB4C0, 0x5280, 0x4EC0, 0x0904, 0x076B, 0x0824, 0x065F, 0x07A2, 0x0616,
+      0x076C, 0x05ED, 0x05EC, 0x042E, 0x050F, 0x0305, 0x0462, 0x02B7, 0x042F, 0x0265, 0x0264, 0x01B2, 0x0100, 0x0080, 0x8000, 0x8000 },
+    { 0x00E3, 0x00A9, 0x6F60, 0x4FA8, 0xBCE0, 0x4510, 0xBEF0, 0xA680, 0x5680, 0x52C0, 0x0DFB, 0x0B58, 0x0D09, 0x0A3C, 0x0BD9, 0x0973,
+      0x0B59, 0x08DA, 0x08D9, 0x05E9, 0x07EC, 0x04B0, 0x06EF, 0x03D2, 0x05EA, 0x031D, 0x031C, 0x0238, 0x0154, 0x00AA, 0x8000, 0x8000 },
+    { 0x01A5, 0x0139, 0x6000, 0x5000, 0x4C00, 0xB800, 0xBC00, 0xC000, 0x6000, 0x5C00, 0x15BA, 0x11BB, 0x14C2, 0x10BD, 0x11BC, 0x0DC1,
+      0x11C0, 0x0DC3, 0x0DC0, 0x09C1, 0x0BC4, 0x07C1, 0x0A00, 0x06CD, 0x09C2, 0x05C1, 0x05C0, 0x041A, 0x0274, 0x013A, 0x8000, 0x8000 },
+    { 0x033D, 0x0231, 0x7E00, 0x5000, 0xB400, 0xB000, 0x4C00, 0xB000, 0x6000, 0x5400, 0x1ED6, 0x1A31, 0x1D14, 0x183B, 0x1BC2, 0x16B2,
+      0x1A32, 0x15EF, 0x15EE, 0x1055, 0x1334, 0x0F2D, 0x11F6, 0x0C5D, 0x1056, 0x0AE1, 0x0AE0, 0x07A2, 0x0464, 0x0232, 0x8000, 0x8000 },
+    { 0x0003, 0x0003, 0x7FFF, 0x7FFF, 0x0000, 0x0000, 0x0000, 0x8100, 0x0000, 0x0000, 0x1FFD, 0x0FFD, 0x1009, 0x0009, 0x0000, 0x0000,
+      0x1009, 0x0009, 0x1FFF, 0x1FFF, 0x1FFE, 0x1FFE, 0x1FFE, 0x1FFE, 0x1FFE, 0x1FFE, 0x1008, 0x1004, 0x0008, 0x0004, 0x8000, 0x8000 },
+    { 0x0003, 0x0003, 0x7FFF, 0x7FFF, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x1FFD, 0x0FFD, 0x1009, 0x0009, 0x0000, 0x0000,
+      0x1009, 0x0009, 0x1FFF, 0x1FFF, 0x1FFE, 0x1FFE, 0x1FFE, 0x1FFE, 0x1FFE, 0x1FFE, 0x1008, 0x1004, 0x0008, 0x0004, 0x8000, 0x8000 },
+    { 0x0017, 0x0013, 0x70F0, 0x4FA8, 0xBCE0, 0x4510, 0xBEF0, 0x8500, 0x5F80, 0x54C0, 0x0371, 0x02AF, 0x02E5, 0x01DF, 0x02B0, 0x01D7,
+      0x0358, 0x026A, 0x01D6, 0x011E, 0x012D, 0x00B1, 0x011F, 0x0059, 0x01A0, 0x00E3, 0x0058, 0x0040, 0x0028, 0x0014, 0x8000, 0x8000 },
+};
+/* the half-band filter (symmetric, 39 taps; the odd taps are zero but the centre's) */
+static const int16_t rv_fir[20] = { -0x0001, 0, 0x0002, 0, -0x000A, 0, 0x0023, 0, -0x0067, 0, 0x010A, 0, -0x0268, 0, 0x0534, 0, -0x0B90, 0, 0x2806, 0x4000 };
+static inline int32_t clamp16(int32_t v) { return v > 32767 ? 32767 : v < -32768 ? -32768 : v; }
+static inline int32_t rv_fir_at(const int32_t *h, uint32_t pos) {   /* h: 64-entry ring, newest at pos */
+    int64_t a = (int64_t)rv_fir[19] * h[(pos - 19) & 63];
+    for (int k = 0; k < 19; k++) a += (int64_t)rv_fir[k] * (h[(pos - k) & 63] + h[(pos - 38 + k) & 63]);
+    return (int32_t)(a >> 15);
+}
+static void sd_set_effect(Core *c, int mode, int16_t depth_l, int16_t depth_r, int delay, int feedback) {
+    /* sceSdSetEffectAttr: the preset's registers, the work area ending at EEA, depth as the effect volume */
+    uint16_t d[32]; memcpy(d, rv_preset[mode], sizeof d);
+    if (mode == 7 || mode == 8) {   /* echo and delay: the delay time and feedback are the caller's */
+        uint16_t dl = (uint16_t)((delay + 1) << 5), fb = (uint16_t)((((feedback << 7) + feedback) << 1));
+        d[R_vWALL] = fb;
+        d[R_mLSAME] = (uint16_t)((dl << 1) - d[R_dAPF1]); d[R_mRSAME] = (uint16_t)(dl - d[R_dAPF2]);
+        d[R_dLSAME] = (uint16_t)(d[R_dRSAME] + dl); d[R_mLCOMB1] = (uint16_t)(d[R_mRCOMB1] + dl);
+        d[R_mRAPF1] = (uint16_t)(d[R_mRAPF2] + dl); d[R_mLAPF1] = (uint16_t)(d[R_mLAPF2] + dl);
+    }
+    for (int i = 0; i < 32; i++) c->rv[i] = (int16_t)d[i];
+    uint32_t eea_bytes = ((c->eea >> 17) << 17) | 0x1ffff;
+    uint32_t size = ((uint32_t)rv_size[mode] << 4) - 2;
+    c->rv_end = eea_bytes >> 1;
+    c->rv_start = eea_bytes > size ? (eea_bytes - size) >> 1 : c->rv_end;   /* no room below EEA: off */
+    c->rv_pos = 0;
+    c->esa = c->rv_start << 1;
+    c->rv_mode = mode;
+    c->evoll = (uint16_t)depth_l; c->evolr = (uint16_t)depth_r;
+}
+static inline uint32_t rv_addr(const Core *c, uint32_t span, int32_t off) {
+    int64_t x = ((int64_t)c->rv_pos + off) % (int64_t)span; if (x < 0) x += span;
+    return (c->rv_start + (uint32_t)x) & (SPU_RAM_BYTES / 2 - 1);
+}
+/* one reverb step for channel R (0 left, 1 right) on the wet input `in`; returns its output */
+static int32_t rv_step(Core *c, int R, int32_t in) {
+    if (c->rv_end <= c->rv_start || c->rv_mode == 0) return 0;
+    uint32_t span = c->rv_end - c->rv_start + 1;
+    int16_t *m = (int16_t *)spu_ram;
+#define RA(off) rv_addr(c, span, (off))
+#define REG(n) ((int32_t)(uint16_t)c->rv[n] * 4)   /* address registers: 8-byte units -> words */
+#define MUL(a, b) (((int32_t)(a) * (int32_t)(b)) >> 15)
+    int32_t same_dst = REG(R ? R_mRSAME : R_mLSAME), same_src = REG(R ? R_dRSAME : R_dLSAME);
+    int32_t diff_dst = REG(R ? R_mRDIFF : R_mLDIFF), diff_src = REG(R ? R_dLDIFF : R_dRDIFF);
+    int32_t apf1_dst = REG(R ? R_mRAPF1 : R_mLAPF1), apf2_dst = REG(R ? R_mRAPF2 : R_mLAPF2);
+    int32_t apf1_src = apf1_dst - REG(R_dAPF1), apf2_src = apf2_dst - REG(R_dAPF2);
+    int32_t x = MUL(c->rv[R ? R_vRIN : R_vLIN], in);
+    int32_t sp = m[RA(same_dst - 1)], dp = m[RA(diff_dst - 1)];
+    int32_t same = MUL(c->rv[R_vIIR], x + MUL(c->rv[R_vWALL], m[RA(same_src)]) - sp) + sp;
+    int32_t diff = MUL(c->rv[R_vIIR], x + MUL(c->rv[R_vWALL], m[RA(diff_src)]) - dp) + dp;
+    int32_t out = MUL(c->rv[R_vCOMB1], m[RA(REG(R ? R_mRCOMB1 : R_mLCOMB1))]) + MUL(c->rv[R_vCOMB2], m[RA(REG(R ? R_mRCOMB2 : R_mLCOMB2))])
+                + MUL(c->rv[R_vCOMB3], m[RA(REG(R ? R_mRCOMB3 : R_mLCOMB3))]) + MUL(c->rv[R_vCOMB4], m[RA(REG(R ? R_mRCOMB4 : R_mLCOMB4))]);
+    int32_t a1s = m[RA(apf1_src)], a1 = out - MUL(c->rv[R_vAPF1], a1s);
+    out = a1s + MUL(c->rv[R_vAPF1], a1);
+    int32_t a2s = m[RA(apf2_src)], a2 = out - MUL(c->rv[R_vAPF2], a2s);
+    out = a2s + MUL(c->rv[R_vAPF2], a2);
+    if (c->fx_on) {
+        m[RA(same_dst)] = (int16_t)clamp16(same); m[RA(diff_dst)] = (int16_t)clamp16(diff);
+        m[RA(apf1_dst)] = (int16_t)clamp16(a1); m[RA(apf2_dst)] = (int16_t)clamp16(a2);
+    }
+#undef RA
+#undef REG
+#undef MUL
+    return clamp16(out);
+}
+/* the core's effect output for this 48 kHz sample, from its wet input */
+static void reverb(Core *c, int32_t wl, int32_t wr, int32_t *ol, int32_t *or_) {
+    uint32_t p = ++c->rv_hp & 63;
+    c->rv_in[0][p] = clamp16(wl); c->rv_in[1][p] = clamp16(wr);
+    int R = c->rv_phase & 1;
+    int32_t y = rv_step(c, R, rv_fir_at(c->rv_in[R], p));
+    c->rv_out[R][p] = y; c->rv_out[!R][p] = 0;
+    if (!(++c->rv_phase & 1) && ++c->rv_pos > c->rv_end - c->rv_start) c->rv_pos = 0;   /* one word on every two samples */
+    *ol = clamp16(rv_fir_at(c->rv_out[0], p) * 2);
+    *or_ = clamp16(rv_fir_at(c->rv_out[1], p) * 2);
+}
+static int rv_disabled = -1;
+
 static void mix_one(int32_t *l, int32_t *r) {
     int32_t ol = 0, orr = 0;
+    if (rv_disabled < 0) rv_disabled = getenv("AE2_REVERB") && !strcmp(getenv("AE2_REVERB"), "0");
+    int32_t ext_l = 0, ext_r = 0;   /* core 0's output, core 1's external input */
     for (int ci = 0; ci < 2; ci++) {
         Core *c = &core[ci];
-        int32_t dl = 0, dr = 0;
+        int32_t dl = 0, dr = 0, wl = 0, wr = 0;
         for (int vi = 0; vi < 24; vi++) {
             Voice *v = &c->v[vi];
             if (!v->on) continue;
             int32_t s = voice_sample(c, vi);
             v->volxl = vol_step(v->voll, v->volxl); v->volxr = vol_step(v->volr, v->volxr);
-            if (c->vmixl & (1u << vi)) dl += (s * v->volxl) >> 15;
-            if (c->vmixr & (1u << vi)) dr += (s * v->volxr) >> 15;
+            int32_t sl = (s * v->volxl) >> 15, sr = (s * v->volxr) >> 15;
+            if (c->vmixl & (1u << vi)) dl += sl;
+            if (c->vmixr & (1u << vi)) dr += sr;
+            if (c->vmixel & (1u << vi)) wl += sl;
+            if (c->vmixer & (1u << vi)) wr += sr;
         }
+        /* MMIX gates for the effect input: voices (0x200/0x100), sound data input (0x20/0x10), core 0 into core 1 (2/1) */
+        if (!(c->mmix & 0x200)) wl = 0;
+        if (!(c->mmix & 0x100)) wr = 0;
+        if (ci == 1) { if (c->mmix & 2) wl += ext_l; if (c->mmix & 1) wr += ext_r; }
         if (c->adma_on && c->adma_size >= 0x400) {
             uint32_t p = c->adma_pos, blk = p >> 8, k = p & 255;
             uint32_t a = c->adma_base + blk * 0x400 + k * 2;
             int16_t sl, sr; memcpy(&sl, IOP(a), 2); memcpy(&sr, IOP(a + 0x200), 2);
-            dl += (sl * (int16_t)c->bvoll) >> 15;     /* input volumes are plain signed 16-bit */
-            dr += (sr * (int16_t)c->bvolr) >> 15;
+            int32_t il = (sl * (int16_t)c->bvoll) >> 15, ir = (sr * (int16_t)c->bvolr) >> 15;   /* input volumes are plain signed 16-bit */
+            dl += il; dr += ir;
+            if (c->mmix & 0x20) wl += il;
+            if (c->mmix & 0x10) wr += ir;
             uint32_t total = c->adma_size / 4;   /* samples in the whole buffer */
             uint32_t half = total / 2;
             p++;
@@ -206,7 +338,12 @@ static void mix_one(int32_t *l, int32_t *r) {
             }
             c->adma_pos = p;
         }
+        if (c->fx_on && !rv_disabled) {
+            int32_t el, er; reverb(c, wl, wr, &el, &er);
+            dl += (el * (int16_t)c->evoll) >> 15; dr += (er * (int16_t)c->evolr) >> 15;
+        }
         int32_t mvl = mvol_written ? fixed_vol(c->mvoll) : 0x7fff, mvr = mvol_written ? fixed_vol(c->mvolr) : 0x7fff;
+        if (ci == 0) { ext_l = (dl * mvl) >> 15; ext_r = (dr * mvr) >> 15; }
         ol += (dl * mvl) >> 15;
         orr += (dr * mvr) >> 15;
     }
@@ -271,10 +408,10 @@ void sd_set_param(uint32_t entry, uint32_t value) {
         }
     }
     switch (p) {
-    case 0x08: c->mmix = value; break;
+    case 0x08: c->mmix = value; if (getenv("AE2_SPULOG")) INFO("[spu] core %d mmix %03x\n", ci, value); break;
     case 0x09: c->mvoll = value; mvol_written = 1; break;
     case 0x0A: c->mvolr = value; mvol_written = 1; break;
-    case 0x0B: c->evoll = value; break;
+    case 0x0B: c->evoll = value; if (getenv("AE2_SPULOG")) INFO("[spu] core %d effect volume %04x\n", ci, value); break;
     case 0x0C: c->evolr = value; break;
     case 0x0D: c->avoll = value; break;
     case 0x0E: c->avolr = value; break;
@@ -374,7 +511,31 @@ uint32_t sd_get_addr(uint32_t entry) {
     return r;
 }
 
-void sd_set_core_attr(uint32_t entry, uint32_t value) { core[entry & 1].attr = (uint16_t)value; }
+void sd_set_core_attr(uint32_t entry, uint32_t value) {
+    pthread_mutex_lock(&spu_mtx);
+    Core *c = &core[entry & 1];
+    c->attr = (uint16_t)value;
+    if ((entry & ~1u) == 2) {   /* SD_CORE_EFFECT_ENABLE */
+        c->fx_on = value != 0;
+        if (getenv("AE2_SPULOG")) INFO("[spu] core %d effects %s\n", (int)(entry & 1), value ? "on" : "off");
+    }
+    pthread_mutex_unlock(&spu_mtx);
+}
+
+int sd_set_effect_attr(int ci, int mode, int16_t depth_l, int16_t depth_r, int delay, int feedback) {
+    mode &= ~0x100;   /* SD_EFFECT_MODE_CLEAR: the work area is cleared below anyway */
+    if (mode < 0 || mode > 9) return -1;
+    pthread_mutex_lock(&spu_mtx);
+    Core *c = &core[ci & 1];
+    sd_set_effect(c, mode, depth_l, depth_r, delay, feedback);
+    /* a new mode starts from a silent work area (the old one's echoes would be noise in it) */
+    if (mode && c->rv_start < c->rv_end && c->rv_end < SPU_RAM_BYTES / 2) memset(spu_ram + c->rv_start * 2, 0, (c->rv_end - c->rv_start + 1) * 2);
+    memset(c->rv_in, 0, sizeof c->rv_in); memset(c->rv_out, 0, sizeof c->rv_out);
+    { static int lg = -1; if (lg < 0) lg = getenv("AE2_SPULOG") != NULL;
+      if (lg) INFO("[spu] core %d reverb mode %d depth %d/%d delay %d feedback %d, area %06x-%06x\n", ci & 1, mode, depth_l, depth_r, delay, feedback, c->rv_start * 2, c->rv_end * 2 + 1); }
+    pthread_mutex_unlock(&spu_mtx);
+    return 0;
+}
 
 int sd_voice_trans(int chan, uint32_t mode, uint32_t iopaddr, uint32_t spuaddr, uint32_t size) {
     chan &= 1;

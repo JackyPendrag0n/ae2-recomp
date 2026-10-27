@@ -35,6 +35,7 @@ int g_force_widescreen = -1;          /* -1: follow the game's own setting; 0/1:
 #define SAVE_CHAR    (SAVE_BASE + 0x4)
 #define GADGETS      0x4d24c0u
 static int unlock_gadgets;
+int cdvd_stage_on_disc(const char *code);   /* iop_services.c */
 
 /* ------------------------------------------------------------------ stage list */
 typedef struct { const char *name; const char *code; int scene; } Stage;
@@ -90,6 +91,8 @@ static void run_action(Action a) {
     switch (a.kind) {
     case ACT_WARP:
         if (!in_game()) { set_status("Start or continue a game first, then warp."); break; }
+        { char code[17]; gread(code, 0x3b17a0u + (uint32_t)a.a * 64, 16); code[16] = 0;
+          if (!cdvd_stage_on_disc(code)) { set_status("That area is not on the disc."); break; } }
         MW32(GS_REQSCENE, (uint32_t)a.a);
         MW32(GS_NEXTSCENE, (uint32_t)a.a);
         MW32(GS_REQMODE, a.b ? 2u : 3u);
@@ -191,9 +194,10 @@ static int build_rows(Row *r) {
         for (int i = 0; i < NSTAGES; i++) { snprintf(r[n].label, 96, "%s", stages[i].name); r[n++].id = R_STAGE0 + i; }
     } else {
         int first, na = stage_areas(area_stage, &first);
-        for (int i = 0; i < na; i++) {
+        for (int i = 0, k = 0; i < na; i++) {
             char code[17]; gread(code, 0x3b17a0u + (first + i) * 64, 16); code[16] = 0;
-            snprintf(r[n].label, 96, "Area %c  (%s)", 'A' + i, code); r[n++].id = R_AREA0 + first + i;
+            if (!cdvd_stage_on_disc(code)) continue;   /* listed in the scene table but not on the disc */
+            snprintf(r[n].label, 96, "Area %c  (%s)", 'A' + k++, code); r[n++].id = R_AREA0 + first + i;
         }
     }
     return n;
